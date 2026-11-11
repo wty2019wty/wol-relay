@@ -9,7 +9,7 @@ updates:
       interval: "weekly"
       day: "monday"
 
-  # Dockerfile 基础镜像（含 @sha256 digest 固定的镜像，Dependabot 会同时更新 tag 与 digest）
+  # Dockerfile 基础镜像（纯 tag 引用，Dependabot 负责升级版本 tag）
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
