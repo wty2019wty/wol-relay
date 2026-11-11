@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    tags: ['v*.*.*']
+    tags: ['v*']
 
 jobs:
   build:
@@ -33,10 +33,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -70,7 +70,7 @@ jobs:
           rm -rf "dist/${stage}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: wol-relay-${{ matrix.target }}
           path: dist/wol-relay-*
@@ -83,7 +83,7 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -93,7 +93,7 @@ jobs:
         run: sha256sum wol-relay-* > SHA256SUMS
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/wol-relay-*
