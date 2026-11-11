@@ -40,19 +40,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux：amd64/arm64 原生运行，x86 用 gcc-multilib 跑 32 位测试
+          # Linux：amd64/arm64 原生运行
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-24.04
-            target: i686-unknown-linux-gnu
-            packages: gcc-multilib
-          # Windows：amd64 原生运行，x86 通过 WOW64 运行 32 位测试
+          # Windows：amd64 原生运行
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: windows-latest
-            target: i686-pc-windows-msvc
           # Windows ARM64 没有托管运行器，仅验证交叉编译
           - os: windows-latest
             target: aarch64-pc-windows-msvc
@@ -67,10 +62,6 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-
-      - name: Install 32-bit C toolchain
-        if: matrix.packages
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
 
       - name: Run tests
         if: ${{ !matrix.compile-only }}

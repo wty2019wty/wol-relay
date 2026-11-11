@@ -9,8 +9,8 @@ for environments where devices are on separate subnets and need to be woken up r
 - Relays valid WOL packets to all other monitored networks
 - Prevents packet loops and duplicate broadcasts
 - Lightweight and easy to deploy (single binary or Docker image)
-- Runs on Linux and Windows (x86, x86_64 and ARM64)
-- Multi-arch container images (linux/amd64, linux/arm64 and linux/386)
+- Runs on Linux and Windows (x86_64 and ARM64)
+- Multi-arch container images (linux/amd64 and linux/arm64)
 - Accepts both interface names and CIDR notation for target networks
 
 ## Usage
@@ -37,7 +37,7 @@ services:
 
 ### Standalone
 
-Prebuilt binaries for Linux and Windows (x86, x86_64 and ARM64) are attached to each
+Prebuilt binaries for Linux and Windows (x86_64 and ARM64) are attached to each
 [GitHub release](https://github.com/danroc/wol-relay/releases). You can also build
 and run the relay directly on your host:
 
@@ -97,7 +97,7 @@ sudo ./wol-relay eno1 eno2 10.0.0.0/24 172.16.0.10/32
 
 ## Requirements
 
-- Linux or Windows (x86, x86_64 and ARM64)
+- Linux or Windows (x86_64 and ARM64)
 - Rust 1.88+ (for building from source)
 - Sufficient privileges to access network interfaces and send broadcast packets
 

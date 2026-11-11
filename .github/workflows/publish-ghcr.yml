@@ -26,11 +26,6 @@ jobs:
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
-          # rust:1-alpine 没有 i386 变体，x86 镜像改用 alpine + apk 的 Rust 工具链
-          - arch: '386'
-            platform: linux/386
-            runner: ubuntu-24.04
-            build_args: BUILDER_IMAGE=alpine:3.24
 
     steps:
       - name: Checkout repository
@@ -64,7 +59,6 @@ jobs:
           context: .
           push: true
           platforms: ${{ matrix.platform }}
-          build-args: ${{ matrix.build_args }}
           tags: ${{ steps.tag.outputs.ref }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.arch }}
@@ -117,6 +111,6 @@ jobs:
           src="${REGISTRY}/${IMAGE_NAME,,}:build-${GITHUB_SHA}"
           for tag in $TAGS; do
             docker buildx imagetools create -t "$tag" \
-              "${src}-amd64" "${src}-arm64" "${src}-386"
+              "${src}-amd64" "${src}-arm64"
             docker buildx imagetools inspect "$tag"
           done

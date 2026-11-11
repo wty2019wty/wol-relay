@@ -11,9 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support Windows, with clean shutdown on Ctrl+C, Ctrl+Break, console close and
   system shutdown events
-- Publish prebuilt binaries for Linux and Windows (x86, x86_64, ARM64) on GitHub
+- Publish prebuilt binaries for Linux and Windows (x86_64, ARM64) on GitHub
   releases, with SHA-256 checksums
-- Publish container images for linux/386 (x86) alongside linux/amd64 and linux/arm64
 - Add CI workflows: lint and tests on all supported targets, GHCR image publishing
   and binary releases
 
@@ -21,14 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Move `libc` and `signal-hook` to Unix-only dependencies; Windows uses
   `windows-sys` for interface alias lookups and console control events
-- Build the x86 container image from Alpine's Rust toolchain, since `rust:1-alpine`
-  has no i386 variant
-
-### Fixed
-
-- Build a fully static binary for the x86 container image: Alpine's packaged Rust
-  links dynamically by default, which broke the `scratch` runtime with
-  `exec /app/wol-relay: no such file or directory`
 
 ## [0.2.0] - 2026-10-14
 

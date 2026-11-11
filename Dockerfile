@@ -2,26 +2,14 @@
 
 # --------------------------------------------------------------------------------------
 # Chef — Rust toolchain plus cargo-chef, shared by the planner and build stages.
-#
-# rust:1-alpine 没有 i386 变体：x86（linux/386）构建时由 CI 传入
-# BUILDER_IMAGE=alpine:3.24，Rust 工具链改由 apk 安装（见 publish-ghcr 工作流）。
 # --------------------------------------------------------------------------------------
 
-ARG BUILDER_IMAGE=rust:1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87
-
-FROM ${BUILDER_IMAGE} AS chef
+FROM rust:1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS chef
 
 # musl-dev: linker and headers for a static musl target
-# rust/cargo: plain alpine builders (x86) do not ship a Rust toolchain
 # file: asserts the built binary is static (scratch ships no dynamic loader)
-RUN if ! command -v cargo >/dev/null 2>&1; then apk add --no-cache rust cargo; fi \
-    && apk add --no-cache musl-dev file \
+RUN apk add --no-cache musl-dev file \
     && cargo install cargo-chef --locked
-
-# Alpine 发行版的 Rust（x86 构建）宿主三元组是 *-alpine-linux-musl，默认动态链接，
-# 放进 scratch 会因缺少 /lib/ld-musl-*.so.1 而无法启动；显式启用 crt-static 产出
-# 静态二进制。官方 rust:1-alpine 的 musl 目标本就默认静态，此设置是幂等的。
-ENV RUSTFLAGS="-C target-feature=+crt-static"
 
 WORKDIR /app
 
