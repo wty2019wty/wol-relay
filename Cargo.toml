@@ -1,7 +1,8 @@
 [package]
 name = "wol-relay"
-version = "0.2.0"
+version = "0.2.11"
 edition = "2024"
+rust-version = "1.88"
 
 [dependencies]
 anyhow = "1"

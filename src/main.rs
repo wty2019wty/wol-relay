@@ -4,6 +4,7 @@
 //! Entry point: parses the CLI, sets up logging, spawns the relay reader thread and the
 //! signal thread, and waits for shutdown.
 
+use std::collections::HashSet;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::process::exit;
 #[cfg(windows)]
@@ -23,7 +24,7 @@ use wol_relay::cli::Cli;
 use wol_relay::logging;
 use wol_relay::network::{
     self, Ipv4Network, MAX_PACKET_SIZE, is_ip_in_any, local_ipv4_addrs, resolve_arg,
-    send_wol_packet, sender_socket,
+    send_wol_payload, sender_socket,
 };
 use wol_relay::wol;
 
@@ -168,6 +169,57 @@ fn resolve_networks(targets: &[String]) -> Vec<Ipv4Network> {
     networks
 }
 
+/// Returns the networks that should receive a relayed packet from `source_ip`.
+///
+/// Networks fully contained in another target network are dropped because the
+/// larger network's broadcast already covers them. The source's own network is
+/// skipped so the packet is not broadcast twice on the network it came from,
+/// and duplicate broadcast addresses are only sent once.
+fn relay_targets(source_ip: Ipv4Addr, networks: &[Ipv4Network]) -> Vec<Ipv4Network> {
+    let mut candidates: Vec<Ipv4Network> = Vec::new();
+    for network in networks {
+        let contained = networks.iter().any(|other| {
+            other.prefix() < network.prefix() && other.contains(network.network())
+        });
+        if !contained && !candidates.contains(network) {
+            candidates.push(*network);
+        }
+    }
+
+    let mut broadcasts = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|network| !network.contains(source_ip))
+        .filter(|network| broadcasts.insert(network.broadcast()))
+        .collect()
+}
+
+/// Why a packet source is or is not relayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceStatus {
+    /// The packet should be relayed to the other monitored networks.
+    Relay,
+    /// The source is not part of any monitored network.
+    Unmonitored,
+    /// The source is one of this host's addresses; relaying it would loop.
+    Local,
+}
+
+/// Classifies a packet source for loop prevention and filtering.
+fn classify_source(
+    source_ip: Ipv4Addr,
+    networks: &[Ipv4Network],
+    self_ips: &[Ipv4Addr],
+) -> SourceStatus {
+    if !is_ip_in_any(source_ip, networks) {
+        SourceStatus::Unmonitored
+    } else if self_ips.contains(&source_ip) {
+        SourceStatus::Local
+    } else {
+        SourceStatus::Relay
+    }
+}
+
 /// Relays a WOL packet for `mac` to every monitored network other than the source's
 /// own, logging the outcome for each.
 fn relay_packet(
@@ -175,17 +227,12 @@ fn relay_packet(
     networks: &[Ipv4Network],
     source_ip: Ipv4Addr,
     mac: wol::Mac,
+    payload: &[u8],
 ) {
     let target_mac = wol::mac_to_string(&mac);
 
-    for network in networks {
-        // Don't send the WOL packet to the same network as the source IP to avoid
-        // broadcasting the packet a second time on the original network.
-        if network.contains(source_ip) {
-            continue;
-        }
-
-        match send_wol_packet(sender, *network, mac) {
+    for network in relay_targets(source_ip, networks) {
+        match send_wol_payload(sender, network, payload) {
             Ok(()) => log::info!(
                 source_ip:display = source_ip,
                 target_network:display = network,
@@ -255,22 +302,24 @@ fn reader_loop(
             }
         };
 
-        // Ignore packets from networks that we are not monitoring.
-        if !is_ip_in_any(source_ip, &networks) {
-            log::debug!(
-                source_ip:display = source_ip;
-                "skipped packet: unmonitored network"
-            );
-            continue;
-        }
-
-        // Skip packets from this host to prevent relay loops.
-        if self_ips.contains(&source_ip) {
-            log::debug!(
-                source_ip:display = source_ip;
-                "skipped packet: sent by this host"
-            );
-            continue;
+        // Ignore packets from unmonitored networks and from this host (the
+        // latter would cause a relay loop).
+        match classify_source(source_ip, &networks, &self_ips) {
+            SourceStatus::Relay => {}
+            SourceStatus::Unmonitored => {
+                log::debug!(
+                    source_ip:display = source_ip;
+                    "skipped packet: unmonitored network"
+                );
+                continue;
+            }
+            SourceStatus::Local => {
+                log::debug!(
+                    source_ip:display = source_ip;
+                    "skipped packet: sent by this host"
+                );
+                continue;
+            }
         }
 
         let mac = match wol::parse_packet(&buffer[..n]) {
@@ -286,7 +335,7 @@ fn reader_loop(
             }
         };
 
-        relay_packet(&sender, &networks, source_ip, mac);
+        relay_packet(&sender, &networks, source_ip, mac, &buffer[..n]);
     }
 }
 
@@ -320,6 +369,7 @@ fn main() {
 
     let network_names: Vec<String> = networks.iter().map(|n| n.to_string()).collect();
     log::info!(
+        version = env!("CARGO_PKG_VERSION"),
         port = wol::DEFAULT_PORT,
         networks:serde = network_names;
         "listening for packets"
@@ -327,11 +377,91 @@ fn main() {
 
     let (stop_tx, stop_rx) = mpsc::channel::<Stop>();
 
+    // Install signal/console handlers before starting the reader so a signal
+    // arriving during startup is handled cleanly.
+    install_signal_handlers(stop_tx.clone());
+
     spawn_thread("reader", {
         let stop_tx = stop_tx.clone();
         move || reader_loop(listener, sender, networks, self_ips, stop_tx)
     });
 
-    install_signal_handlers(stop_tx);
     wait_for_stop(stop_rx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn net(addr: &str, prefix: u8) -> Ipv4Network {
+        Ipv4Network::new(addr.parse().unwrap(), prefix).unwrap()
+    }
+
+    #[test]
+    fn relay_targets_skips_the_source_network() {
+        let networks = [net("10.0.0.0", 24), net("192.168.1.0", 24)];
+        let targets = relay_targets("10.0.0.5".parse().unwrap(), &networks);
+        assert_eq!(targets, vec![net("192.168.1.0", 24)]);
+    }
+
+    #[test]
+    fn relay_targets_collapses_networks_contained_in_a_larger_target() {
+        let networks = [
+            net("10.0.0.0", 16),
+            net("10.0.1.0", 24),
+            net("192.168.1.0", 24),
+        ];
+
+        // 源不在 10/16 中：10.0.1.0/24 被 10.0.0.0/16 覆盖，只保留父网段。
+        let targets = relay_targets("172.16.0.5".parse().unwrap(), &networks);
+        assert_eq!(targets, vec![net("10.0.0.0", 16), net("192.168.1.0", 24)]);
+
+        // 源在 10/16 中：父网段被跳过，子网段也不应再单独广播。
+        let targets = relay_targets("10.0.2.5".parse().unwrap(), &networks);
+        assert_eq!(targets, vec![net("192.168.1.0", 24)]);
+    }
+
+    #[test]
+    fn relay_targets_dedups_exact_networks() {
+        let networks = [net("10.0.0.0", 24), net("10.0.0.0", 24)];
+        let targets = relay_targets("172.16.0.5".parse().unwrap(), &networks);
+        assert_eq!(targets, vec![net("10.0.0.0", 24)]);
+    }
+
+    #[test]
+    fn relay_targets_keeps_unicast_targets() {
+        let networks = [net("192.168.2.5", 32)];
+        let targets = relay_targets("172.16.0.5".parse().unwrap(), &networks);
+        assert_eq!(targets, vec![net("192.168.2.5", 32)]);
+    }
+
+    #[test]
+    fn classify_source_filters_unmonitored_and_local_packets() {
+        let networks = [net("10.0.0.0", 24)];
+        let self_ips: Vec<Ipv4Addr> = vec!["10.0.0.2".parse().unwrap()];
+
+        assert_eq!(
+            classify_source("10.0.0.3".parse().unwrap(), &networks, &self_ips),
+            SourceStatus::Relay
+        );
+        assert_eq!(
+            classify_source("10.0.0.2".parse().unwrap(), &networks, &self_ips),
+            SourceStatus::Local
+        );
+        assert_eq!(
+            classify_source("192.168.1.2".parse().unwrap(), &networks, &self_ips),
+            SourceStatus::Unmonitored
+        );
+    }
+
+    #[test]
+    fn resolve_networks_dedups_and_preserves_order() {
+        let targets = vec![
+            "10.0.0.5/24".to_string(),
+            "10.0.0.0/24".to_string(),
+            "192.168.1.1/24".to_string(),
+        ];
+        let networks = resolve_networks(&targets);
+        assert_eq!(networks, vec![net("10.0.0.0", 24), net("192.168.1.0", 24)]);
+    }
 }

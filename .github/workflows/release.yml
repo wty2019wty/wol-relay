@@ -7,6 +7,10 @@ on:
   push:
     tags: ['v*']
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build (${{ matrix.target }})
@@ -25,6 +29,7 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: windows-latest
             target: aarch64-pc-windows-msvc
+            cross: true
 
     steps:
       - name: Checkout repository
@@ -37,7 +42,35 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # 防止 tag 与 Cargo 包版本不一致（例如 tag 为 v0.2.11，Cargo.toml 仍是 0.2.0）。
+      - name: Verify package version matches tag
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          actual="$(cargo pkgid -p wol-relay)"
+          actual="${actual##*#}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::package version '$actual' does not match tag '$expected'"
+            exit 1
+          fi
+
+      # 交叉编译的目标无法在构建机上执行，只在原生目标上检查二进制输出。
+      - name: Verify binary version matches tag
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          bin="wol-relay"
+          if [[ "${{ matrix.target }}" == *-windows-* ]]; then
+            bin="wol-relay.exe"
+          fi
+          actual="$(target/${{ matrix.target }}/release/${bin} --version | awk '{print $2}')"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::binary version '$actual' does not match tag '$expected'"
+            exit 1
+          fi
 
       # 打包二进制、README 和 LICENSE：Windows 用 .zip，其余用 .tar.gz
       - name: Package binary
@@ -54,7 +87,7 @@ jobs:
           cp "target/${target}/release/${bin}" "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/"
           if [[ "$target" == *-windows-* ]]; then
-            (cd dist && tar -a -cf "${stage}.zip" "${stage}")
+            powershell -NoProfile -Command "Compress-Archive -Path 'dist/${stage}' -DestinationPath 'dist/${stage}.zip' -Force"
           else
             (cd dist && tar -czf "${stage}.tar.gz" "${stage}")
           fi

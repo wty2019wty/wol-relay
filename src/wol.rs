@@ -6,6 +6,10 @@ pub const HEADER_SIZE: usize = 6;
 pub const MAC_SIZE: usize = 6;
 pub const MAC_REPEAT: usize = 16;
 pub const PACKET_SIZE: usize = HEADER_SIZE + MAC_SIZE * MAC_REPEAT;
+/// The largest SecureOn password appended to a magic packet.
+pub const MAX_PASSWORD_SIZE: usize = MAC_SIZE;
+/// The largest accepted packet: a magic packet plus a SecureOn password.
+pub const MAX_ACCEPTED_SIZE: usize = PACKET_SIZE + MAX_PASSWORD_SIZE;
 
 /// A MAC-48 address.
 pub type Mac = [u8; MAC_SIZE];
@@ -42,10 +46,15 @@ pub fn build_packet(mac: Mac) -> Packet {
 }
 
 /// Parses a Wake-on-LAN packet and returns the MAC address contained in it.
+///
+/// Only the first [`PACKET_SIZE`] bytes are validated. Up to
+/// [`MAX_PASSWORD_SIZE`] trailing bytes are accepted so that packets carrying a
+/// SecureOn password (4 or 6 bytes) can still be relayed unchanged.
 pub fn parse_packet(packet: &[u8]) -> Result<Mac, WolError> {
-    if packet.len() != PACKET_SIZE {
+    if packet.len() < PACKET_SIZE || packet.len() > MAX_ACCEPTED_SIZE {
         return Err(WolError::InvalidSize);
     }
+    let packet = &packet[..PACKET_SIZE];
 
     // The header must be the 0xFF byte repeated 6 times.
     if packet[..HEADER_SIZE] != [0xff; HEADER_SIZE] {
@@ -78,8 +87,22 @@ mod tests {
     fn parse_packet_rejects_wrong_size() {
         let short = [0u8; PACKET_SIZE - 1];
         assert_eq!(parse_packet(&short), Err(WolError::InvalidSize));
-        let long = vec![0xffu8; PACKET_SIZE + 1];
-        assert_eq!(parse_packet(&long), Err(WolError::InvalidSize));
+
+        let too_long = vec![0xffu8; MAX_ACCEPTED_SIZE + 1];
+        assert_eq!(parse_packet(&too_long), Err(WolError::InvalidSize));
+    }
+
+    #[test]
+    fn parse_packet_accepts_secure_on_password() {
+        let mac: Mac = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+
+        // SecureOn passwords are 4 or 6 bytes appended after the 16 MAC repeats.
+        let mut packet = build_packet(mac).to_vec();
+        packet.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(parse_packet(&packet).unwrap(), mac);
+
+        packet.extend_from_slice(&[0x01, 0x02]);
+        assert_eq!(parse_packet(&packet).unwrap(), mac);
     }
 
     #[test]

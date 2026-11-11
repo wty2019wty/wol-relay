@@ -136,6 +136,20 @@ fn interface_exists(name: &str) -> bool {
     }
 }
 
+/// 比较 `if-addrs` 返回的接口名与用户提供的 target。
+///
+/// Windows 的接口别名大小写不敏感；Unix 的接口名大小写敏感。
+fn iface_name_eq(a: &str, b: &str) -> bool {
+    #[cfg(windows)]
+    {
+        a.eq_ignore_ascii_case(b)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
 /// Expands a CLI argument into one or more IPv4 networks.
 ///
 /// 含 "/" 的参数按 CIDR 解析，其余按网络接口名解析。接口名不会包含 "/"
@@ -153,14 +167,20 @@ pub fn resolve_arg(arg: &str) -> anyhow::Result<Vec<Ipv4Network>> {
         anyhow::bail!("resolve interface {arg:?}: not found");
     }
 
-    Ok(ifaces
+    let networks: Vec<Ipv4Network> = ifaces
         .iter()
-        .filter(|iface| iface.name == arg)
+        .filter(|iface| iface_name_eq(&iface.name, arg))
         .filter_map(|iface| match &iface.addr {
             if_addrs::IfAddr::V4(addr) => addr_to_network(addr.ip, addr.netmask),
             _ => None,
         })
-        .collect())
+        .collect();
+
+    if networks.is_empty() {
+        log::warn!(interface = arg; "interface has no usable IPv4 addresses");
+    }
+
+    Ok(networks)
 }
 
 /// An interface address and its netmask as a network, or `None` when the netmask is
@@ -207,15 +227,27 @@ pub fn sender_socket() -> anyhow::Result<UdpSocket> {
     Ok(socket)
 }
 
-/// Sends a Wake-on-LAN packet to the broadcast address of the given network.
+/// Sends a raw Wake-on-LAN payload to the broadcast address of the given network.
+///
+/// The payload is forwarded unchanged so that optional trailing data (for
+/// example a SecureOn password) is preserved.
+pub fn send_wol_payload(
+    socket: &UdpSocket,
+    network: Ipv4Network,
+    payload: &[u8],
+) -> std::io::Result<()> {
+    socket.send_to(payload, (network.broadcast(), wol::DEFAULT_PORT))?;
+    Ok(())
+}
+
+/// Builds and sends a standard Wake-on-LAN packet to the broadcast address of
+/// the given network.
 pub fn send_wol_packet(
     socket: &UdpSocket,
     network: Ipv4Network,
     mac: wol::Mac,
 ) -> std::io::Result<()> {
-    let broadcast_ip = network.broadcast();
-    socket.send_to(&wol::build_packet(mac), (broadcast_ip, wol::DEFAULT_PORT))?;
-    Ok(())
+    send_wol_payload(socket, network, &wol::build_packet(mac))
 }
 
 /// True for socket errors a blocking call may recover from without giving up.
@@ -361,6 +393,26 @@ mod tests {
         assert!(resolve_arg("no-such-interface-xyz").is_err());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn resolve_arg_matches_windows_interface_names_case_insensitively() {
+        let ifaces = if_addrs::get_if_addrs().unwrap();
+        let Some(iface) = ifaces.iter().find(|iface| {
+            !iface.name.is_empty()
+                && iface.name.is_ascii()
+                && matches!(iface.addr, if_addrs::IfAddr::V4(_))
+        }) else {
+            eprintln!("skipping: no ASCII IPv4 interface");
+            return;
+        };
+
+        let upper = iface.name.to_ascii_uppercase();
+        let exact = resolve_arg(&iface.name).unwrap();
+        let mixed_case = resolve_arg(&upper).unwrap();
+        assert_eq!(mixed_case, exact);
+        assert!(!mixed_case.is_empty(), "{}", iface.name);
+    }
+
     #[test]
     fn resolve_arg_skips_addresses_with_unknown_netmask() {
         // Loopback interface name is platform-specific (lo0 on macOS, lo on
@@ -418,6 +470,16 @@ mod tests {
         let network = net("127.0.0.1", 32);
         let mac: wol::Mac = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
         send_wol_packet(&socket, network, mac)
+            .expect("unicast send to a loopback host must succeed");
+    }
+
+    #[test]
+    fn send_wol_payload_sends_raw_bytes_to_loopback_host() {
+        let socket = sender_socket().unwrap();
+        let network = net("127.0.0.1", 32);
+        // 模拟带 SecureOn 密码的魔术包；转发时必须保持原始字节。
+        let payload = [0xabu8; wol::PACKET_SIZE + 4];
+        send_wol_payload(&socket, network, &payload)
             .expect("unicast send to a loopback host must succeed");
     }
 

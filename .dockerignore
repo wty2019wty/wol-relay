@@ -1,5 +1,7 @@
 target/
 dist/
+.github/
+tests/
 .superpowers/
 docs/
 .git/

@@ -40,6 +40,9 @@ fn to_json(value: &Value) -> Json {
 }
 
 /// Appends `,"key":value` for every field.
+///
+/// The keys `time`, `level` and `message` are reserved for the prefix emitted by
+/// [`json_prefix`]; log call sites must not reuse them.
 struct JsonFields<'a>(&'a mut String);
 
 impl<'kvs> VisitSource<'kvs> for JsonFields<'_> {

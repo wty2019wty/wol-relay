@@ -25,6 +25,21 @@ fn run(args: &[&str]) -> (i32, Vec<Value>) {
 }
 
 #[test]
+fn version_flag_reports_the_package_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_wol-relay"))
+        .arg("--version")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout.trim(),
+        format!("wol-relay {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn unknown_interface_logs_a_structured_resolve_failure() {
     let (code, records) = run(&["no-such-interface-xyz"]);
 

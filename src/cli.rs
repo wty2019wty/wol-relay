@@ -72,8 +72,20 @@ mod tests {
     /// tests mutate.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Removes relay environment variables so explicit CLI tests are not affected by
+    /// the developer's shell (or by a previous test that panicked mid-cleanup).
+    fn clear_relay_env() {
+        // SAFETY: ENV_LOCK serializes every test that reads or writes the environment.
+        unsafe {
+            std::env::remove_var("WOL_RELAY_TARGETS");
+            std::env::remove_var("WOL_RELAY_LOG_LEVEL");
+            std::env::remove_var("WOL_RELAY_LOG_FORMAT");
+        }
+    }
+
     fn parse<const N: usize>(args: [&str; N]) -> Result<Cli, clap::Error> {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_relay_env();
         Cli::try_parse_from(args)
     }
 

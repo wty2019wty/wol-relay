@@ -8,6 +8,10 @@ on:
     branches: [main,dev]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint (${{ matrix.os }})
@@ -31,7 +35,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
   test:
     name: Test (${{ matrix.target }})
@@ -65,8 +69,33 @@ jobs:
 
       - name: Run tests
         if: ${{ !matrix.compile-only }}
-        run: cargo test --target ${{ matrix.target }}
+        run: cargo test --locked --target ${{ matrix.target }}
 
       - name: Verify cross-compilation
         if: matrix.compile-only
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+  docker:
+    name: Docker build (linux/amd64)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: wol-relay:ci
+          cache-from: type=gha,scope=ci-docker
+          cache-to: type=gha,mode=max,scope=ci-docker
+
+      - name: Smoke test image
+        run: docker run --rm wol-relay:ci --version

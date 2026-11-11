@@ -9,6 +9,11 @@ on:
     branches: [main,dev]
     tags: ['v*']
 
+# 串行化发布，确保 staging-<arch> 临时标签不会被并发运行覆盖。
+concurrency:
+  group: publish-ghcr
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -49,9 +54,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
+      # 固定临时标签：每次发布覆盖同名的 staging-<arch>，避免按提交累积。
       - name: Compute temporary per-arch tag
         id: tag
-        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}:build-${GITHUB_SHA}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}:staging-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -102,13 +108,14 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=develop
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Create and push manifest list
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          src="${REGISTRY}/${IMAGE_NAME,,}:build-${GITHUB_SHA}"
+          src="${REGISTRY}/${IMAGE_NAME,,}:staging"
           for tag in $TAGS; do
             docker buildx imagetools create -t "$tag" \
               "${src}-amd64" "${src}-arm64"

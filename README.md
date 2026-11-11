@@ -7,7 +7,9 @@ for environments where devices are on separate subnets and need to be woken up r
 
 - Listens for WOL packets on specified interfaces
 - Relays valid WOL packets to all other monitored networks
-- Prevents packet loops and duplicate broadcasts
+- Skips the source network and de-duplicates overlapping broadcast targets to avoid
+  relay loops and duplicate broadcasts
+- Preserves optional SecureOn password bytes when relaying
 - Lightweight and easy to deploy (single binary or Docker image)
 - Runs on Linux and Windows (x86_64 and ARM64)
 - Multi-arch container images (linux/amd64 and linux/arm64)
@@ -23,7 +25,7 @@ and `eno2` network interfaces:
 ```yaml
 services:
   wol-relay:
-    image: ghcr.io/danroc/wol-relay:latest
+    image: ghcr.io/wty2019wty/wol-relay:latest
     container_name: wol-relay
     network_mode: host
     command: eno1 eno2
@@ -35,10 +37,23 @@ services:
 > **Note:** `network_mode: host` is required for the container to access host network
 > interfaces and broadcast packets.
 
+Published image tags:
+
+| Tag | Source |
+| --- | --- |
+| `latest` | latest `v*` release tag |
+| `edge` | latest `main` branch build |
+| `develop` | latest `dev` branch build |
+| `0.2.11`, `0.2`, `0` | release tags |
+
+The container listens on UDP port 9, which is a privileged port. The image therefore
+runs as root by default. To run it as a non-root user, grant `CAP_NET_BIND_SERVICE`
+and specify the user explicitly.
+
 ### Standalone
 
 Prebuilt binaries for Linux and Windows (x86_64 and ARM64) are attached to each
-[GitHub release](https://github.com/danroc/wol-relay/releases). You can also build
+[GitHub release](https://github.com/wty2019wty/wol-relay/releases). You can also build
 and run the relay directly on your host:
 
 ```sh
@@ -50,8 +65,8 @@ sudo ./target/release/wol-relay eno1 eno2
 ```
 
 Replace `eno1` and `eno2` with the names of your network interfaces. On Windows, use
-the interface aliases shown by `netsh interface` (e.g. `"Ethernet 2"`), and note that
-sending broadcast packets may require elevated privileges.
+the interface aliases shown by `netsh interface` (e.g. `"Ethernet 2"`); matching is
+case-insensitive. Sending broadcast packets may require elevated privileges.
 
 ### Options
 
@@ -69,7 +84,7 @@ Compose:
 ```yaml
 services:
   wol-relay:
-    image: ghcr.io/danroc/wol-relay:latest
+    image: ghcr.io/wty2019wty/wol-relay:latest
     network_mode: host
     environment:
       WOL_RELAY_TARGETS: eno1,eno2
@@ -95,6 +110,20 @@ sudo ./wol-relay eno1 192.168.2.5/32
 sudo ./wol-relay eno1 eno2 10.0.0.0/24 172.16.0.10/32
 ```
 
+## Limitations
+
+- Only IPv4 and UDP port 9 are supported.
+- Packets sent by the relay host itself are ignored to prevent relay loops. A WOL
+  sender running on the same host is therefore not relayed by this process.
+- Multiple relays connected in a ring can still create loops; avoid circular relay
+  topologies.
+- Overlapping target networks are folded into the larger network. Avoid overlapping
+  subnets on different interfaces, where they may represent separate broadcast
+  domains.
+- Wake-on-LAN has no authentication. Anyone who can send packets on a monitored
+  network can trigger relayed wake packets.
+- Interface names are case-sensitive on Unix and case-insensitive on Windows.
+
 ## Requirements
 
 - Linux or Windows (x86_64 and ARM64)
@@ -114,7 +143,9 @@ sudo ./wol-relay eno1 eno2 10.0.0.0/24 172.16.0.10/32
   ```sh
   docker build -t wol-relay .
   ```
+
 ## Proxmox OCI Entrypoint
-  ```sh
-  /bin/sh -c "sleep 5 && exec /usr/local/bin/wol-relay eth0 eth1"
-  ```
+
+```sh
+/bin/sh -c "sleep 5 && exec /usr/local/bin/wol-relay eth0 eth1"
+```

@@ -5,6 +5,7 @@
 # Project metadata
 PROJECT_NAME := wol-relay
 DESCRIPTION := Wake-on-LAN relay service
+DOCKER_IMAGE ?= ghcr.io/wty2019wty/$(PROJECT_NAME)
 
 # Directories
 ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))

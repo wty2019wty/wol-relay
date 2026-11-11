@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-11-11
+
+### Added
+
+- Relay SecureOn-protected magic packets unchanged, including the optional 4- or
+  6-byte password suffix
+- Match Windows interface aliases case-insensitively
+- Add unit tests for relay target selection, source filtering and network deduplication
+- Build and smoke-test the Docker image in CI
+- Verify that the release binary version matches the pushed tag
+
+### Changed
+
+- De-duplicate and collapse overlapping target networks before broadcasting
+- Report the package version in the startup log
+- Publish `edge` images from `main` and `develop` images only from `dev`
+- Package Windows releases with `Compress-Archive` instead of relying on `tar -a`
+- Serialize GHCR publishes and reuse fixed staging tags to avoid tag accumulation
+
+### Fixed
+
+- Prevent a stale `Cargo.toml` version from producing release binaries with the wrong
+  `--version` output
+- Prevent Windows interface names from being silently ignored when their case differs
+- Avoid a startup window where a signal could terminate the process before handlers
+  are installed
+- Isolate CLI tests from `WOL_RELAY_*` variables set in the developer environment
+
+## [0.2.10] - 2026-11-11
+
 ### Added
 
 - Support Windows, with clean shutdown on Ctrl+C, Ctrl+Break, console close and
@@ -20,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Move `libc` and `signal-hook` to Unix-only dependencies; Windows uses
   `windows-sys` for interface alias lookups and console control events
+- Simplify the Docker build and runtime image: remove `cargo-chef`, run the
+  static binary from Alpine instead of `scratch`, and stop pinning base image
+  digests
 
 ## [0.2.0] - 2026-10-14
 
@@ -233,8 +266,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use logrus as logger ([8739a5b](https://github.com/danroc/wol-repeater/commit/8739a5b))
 - Remove `main` binary ([a9dc4e4](https://github.com/danroc/wol-repeater/commit/a9dc4e4))
 
-[Unreleased]: https://github.com/danroc/wol-relay/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/danroc/wol-relay/compare/v0.1.13...v0.2.0
+[Unreleased]: https://github.com/wty2019wty/wol-relay/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/wty2019wty/wol-relay/compare/v0.2.10...v0.2.11
+[0.2.10]: https://github.com/wty2019wty/wol-relay/compare/v0.2.0...v0.2.10
+[0.2.0]: https://github.com/wty2019wty/wol-relay/compare/v0.1.13...v0.2.0
 [0.1.13]: https://github.com/danroc/wol-relay/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/danroc/wol-relay/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/danroc/wol-relay/compare/v0.1.10...v0.1.11
