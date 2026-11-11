@@ -1,0 +1,24 @@
+# Dependabot 依赖更新配置（由 renovate.json 迁移而来）
+# 文档：https://docs.github.com/zh/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # Rust 依赖（Cargo.toml / Cargo.lock）
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+
+  # Dockerfile 基础镜像（含 @sha256 digest 固定的镜像，Dependabot 会同时更新 tag 与 digest）
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+
+  # GitHub Actions（保持浮动版本 tag，不做 digest 固定，与原 Renovate 规则一致）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
