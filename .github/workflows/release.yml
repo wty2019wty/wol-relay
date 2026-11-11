@@ -1,0 +1,92 @@
+---
+name: Release
+permissions:
+  contents: write
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux：amd64/arm64 原生构建
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          # Windows：amd64 原生构建，ARM64 用 MSVC 工具链交叉构建
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # 打包二进制、README 和 LICENSE：Windows 用 .zip，其余用 .tar.gz
+      - name: Package binary
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          target="${{ matrix.target }}"
+          stage="wol-relay-${version}-${target}"
+          bin="wol-relay"
+          if [[ "$target" == *-windows-* ]]; then
+            bin="wol-relay.exe"
+          fi
+          mkdir -p "dist/${stage}"
+          cp "target/${target}/release/${bin}" "dist/${stage}/"
+          cp README.md LICENSE "dist/${stage}/"
+          if [[ "$target" == *-windows-* ]]; then
+            (cd dist && tar -a -cf "${stage}.zip" "${stage}")
+          else
+            (cd dist && tar -czf "${stage}.tar.gz" "${stage}")
+          fi
+          rm -rf "dist/${stage}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wol-relay-${{ matrix.target }}
+          path: dist/wol-relay-*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum wol-relay-* > SHA256SUMS
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/wol-relay-*
+            dist/SHA256SUMS
+          generate_release_notes: true

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support Windows, with clean shutdown on Ctrl+C, Ctrl+Break, console close and
+  system shutdown events
+- Publish prebuilt binaries for Linux and Windows (x86_64, ARM64) on GitHub
+  releases, with SHA-256 checksums
+- Add CI workflows: lint and tests on all supported targets, GHCR image publishing
+  and binary releases
+
+### Changed
+
+- Move `libc` and `signal-hook` to Unix-only dependencies; Windows uses
+  `windows-sys` for interface alias lookups and console control events
+
 ## [0.2.0] - 2026-10-14
 
 > The service is now written in Rust. The Go implementation remains available on the

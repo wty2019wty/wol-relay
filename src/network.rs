@@ -105,19 +105,42 @@ pub fn netmask_to_prefix(mask: Ipv4Addr) -> Option<u8> {
     }
 }
 
-/// Reports whether a network interface with the given name exists, whether or not it
-/// has any addresses.
+/// 检查给定名字的网络接口是否存在（无论是否配置了 IP 地址）。
+#[cfg(unix)]
 fn interface_exists(name: &str) -> bool {
     std::ffi::CString::new(name)
         .map(|name| unsafe { libc::if_nametoindex(name.as_ptr()) } != 0)
         .unwrap_or(false)
 }
 
+/// 检查给定名字的网络接口是否存在（无论是否配置了 IP 地址）。
+///
+/// Windows 版：`if-addrs` 报告的接口名是接口别名（FriendlyName，如
+/// "Loopback Pseudo-Interface 1"），对应 `ConvertInterfaceAliasToLuid` 的名字空间；
+/// 按别名查 LUID 成功即表示接口存在，与是否配置了 IP 地址无关。
+#[cfg(windows)]
+fn interface_exists(name: &str) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::NO_ERROR;
+    use windows_sys::Win32::NetworkManagement::IpHelper::ConvertInterfaceAliasToLuid;
+    use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+
+    // 别名是 UTF-16 字符串，且可能包含非 ASCII 字符（如"以太网"）。
+    let alias: Vec<u16> = std::ffi::OsStr::new(name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut luid = std::mem::MaybeUninit::<NET_LUID_LH>::uninit();
+    unsafe {
+        ConvertInterfaceAliasToLuid(alias.as_ptr(), luid.as_mut_ptr()) == NO_ERROR
+    }
+}
+
 /// Expands a CLI argument into one or more IPv4 networks.
 ///
-/// Arguments containing "/" are treated as CIDR notation; everything else is treated as
-/// a network interface name (Linux interface names cannot contain "/", so the heuristic
-/// is unambiguous).
+/// 含 "/" 的参数按 CIDR 解析，其余按网络接口名解析。接口名不会包含 "/"
+/// （Linux 接口名与 Windows 的接口别名 FriendlyName 都不含 "/"），
+/// 因此该启发式是无歧义的。
 pub fn resolve_arg(arg: &str) -> anyhow::Result<Vec<Ipv4Network>> {
     if arg.contains('/') {
         let network = parse_cidr(arg)?;
@@ -367,11 +390,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_arg_accepts_existing_interface_without_addresses() {
         // An existing interface with no IP address must resolve to an empty
         // list, not an error (Go: net.InterfaceByName succeeds and Addrs()
         // is empty). gif0 exists on macOS without addresses; skip the test
         // on platforms where it does not exist.
+        //
+        // 仅 Unix：该场景是 macOS 的 gif0，且这里直接调用 libc::if_nametoindex。
         if unsafe { libc::if_nametoindex(c"gif0".as_ptr()) } == 0 {
             eprintln!("skipping: no gif0 interface");
             return;

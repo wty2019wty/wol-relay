@@ -7,7 +7,8 @@
 FROM rust:1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS chef
 
 # musl-dev: linker and headers for a static musl target
-RUN apk add --no-cache musl-dev \
+# file: asserts the built binary is static (scratch ships no dynamic loader)
+RUN apk add --no-cache musl-dev file \
     && cargo install cargo-chef --locked
 
 WORKDIR /app
@@ -32,7 +33,13 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN cargo build --release
+# 断言二进制是静态链接：动态二进制在 scratch 运行时只会报
+# "exec /app/wol-relay: no such file or directory"，难以定位。
+RUN cargo build --release \
+    && if file target/release/wol-relay | grep -q interpreter; then \
+        echo "error: wol-relay is dynamically linked, but the runtime image has no loader" >&2; \
+        exit 1; \
+    fi
 
 # --------------------------------------------------------------------------------------
 # Run — minimal runtime image; the binary is fully static.

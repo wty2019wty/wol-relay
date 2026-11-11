@@ -1,0 +1,72 @@
+---
+name: CI
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main,dev]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux：amd64/arm64 原生运行
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          # Windows：amd64 原生运行
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Windows ARM64 没有托管运行器，仅验证交叉编译
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            compile-only: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Run tests
+        if: ${{ !matrix.compile-only }}
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Verify cross-compilation
+        if: matrix.compile-only
+        run: cargo build --release --target ${{ matrix.target }}
