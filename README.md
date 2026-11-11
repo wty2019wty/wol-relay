@@ -114,3 +114,7 @@ sudo ./wol-relay eno1 eno2 10.0.0.0/24 172.16.0.10/32
   ```sh
   docker build -t wol-relay .
   ```
+# Proxmox OCI Entrypoint
+  ```sh
+  /bin/sh -c "sleep 5 && exec /usr/local/bin/wol-relay eth0 eth1"
+  ```
