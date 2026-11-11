@@ -8,11 +8,24 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 if-addrs = "0.15"
-libc = "0.2"
 log = { version = "0.4", features = ["kv_serde"] }
 serde_json = "1"
-signal-hook = "0.4"
 thiserror = "2"
+
+# Unix：if_nametoindex 与 SIGTERM/SIGINT 处理
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+signal-hook = "0.4"
+
+# Windows：接口别名查询（ConvertInterfaceAliasToLuid）与控制台控制事件
+# （SetConsoleCtrlHandler）
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_System_Console",
+] }
 
 [profile.release]
 strip = true

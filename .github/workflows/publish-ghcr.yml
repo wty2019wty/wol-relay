@@ -1,5 +1,5 @@
 ---
-name: Publish Docker image
+name: Publish GHCR image
 permissions:
   contents: read
   packages: write
@@ -26,6 +26,11 @@ jobs:
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
+          # rust:1-alpine 没有 i386 变体，x86 镜像改用 alpine + apk 的 Rust 工具链
+          - arch: '386'
+            platform: linux/386
+            runner: ubuntu-24.04
+            build_args: BUILDER_IMAGE=alpine:3.24
 
     steps:
       - name: Checkout repository
@@ -59,13 +64,14 @@ jobs:
           context: .
           push: true
           platforms: ${{ matrix.platform }}
+          build-args: ${{ matrix.build_args }}
           tags: ${{ steps.tag.outputs.ref }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      # Guards against shipping a stub binary (e.g. a stale dependency-cache build).
-      # Runs before the `merge` job, so a failure keeps the image from being tagged.
+      # 防止发布空壳二进制（例如依赖缓存陈旧导致的构建）。该步骤在 merge 任务之前
+      # 运行，失败时镜像不会被打上正式 tag。
       - name: Smoke test the built image
         env:
           IMAGE_REF: ${{ steps.tag.outputs.ref }}
@@ -79,7 +85,7 @@ jobs:
 
   merge:
     name: Publish multi-arch manifest
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     needs: build
 
     steps:
@@ -110,6 +116,7 @@ jobs:
         run: |
           src="${REGISTRY}/${IMAGE_NAME,,}:build-${GITHUB_SHA}"
           for tag in $TAGS; do
-            docker buildx imagetools create -t "$tag" "${src}-amd64" "${src}-arm64"
+            docker buildx imagetools create -t "$tag" \
+              "${src}-amd64" "${src}-arm64" "${src}-386"
             docker buildx imagetools inspect "$tag"
           done

@@ -2,12 +2,19 @@
 
 # --------------------------------------------------------------------------------------
 # Chef — Rust toolchain plus cargo-chef, shared by the planner and build stages.
+#
+# rust:1-alpine 没有 i386 变体：x86（linux/386）构建时由 CI 传入
+# BUILDER_IMAGE=alpine:3.24，Rust 工具链改由 apk 安装（见 publish-ghcr 工作流）。
 # --------------------------------------------------------------------------------------
 
-FROM rust:1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS chef
+ARG BUILDER_IMAGE=rust:1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87
+
+FROM ${BUILDER_IMAGE} AS chef
 
 # musl-dev: linker and headers for a static musl target
-RUN apk add --no-cache musl-dev \
+# rust/cargo: plain alpine builders (x86) do not ship a Rust toolchain
+RUN if ! command -v cargo >/dev/null 2>&1; then apk add --no-cache rust cargo; fi \
+    && apk add --no-cache musl-dev \
     && cargo install cargo-chef --locked
 
 WORKDIR /app

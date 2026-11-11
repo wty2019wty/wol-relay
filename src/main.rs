@@ -6,10 +6,18 @@
 
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::process::exit;
+#[cfg(windows)]
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
+#[cfg(windows)]
+use std::time::Duration;
 
 use clap::Parser;
+#[cfg(windows)]
+use windows_sys::Win32::System::Console::{
+    CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+};
 
 use wol_relay::cli::Cli;
 use wol_relay::logging;
@@ -47,8 +55,9 @@ fn spawn_thread(name: &str, f: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// Forward SIGTERM/SIGINT to the stop channel.
-fn spawn_signal_thread(stop_tx: mpsc::Sender<Stop>) {
+/// 将 SIGTERM/SIGINT 转发到停止通道（Unix）。
+#[cfg(unix)]
+fn install_signal_handlers(stop_tx: mpsc::Sender<Stop>) {
     let signals = signal_hook::iterator::Signals::new([
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGINT,
@@ -63,6 +72,52 @@ fn spawn_signal_thread(stop_tx: mpsc::Sender<Stop>) {
             let _ = stop_tx.send(Stop::Signal(sig));
         }
     });
+}
+
+/// 控制台事件处理函数只能是普通的 `extern "system"` 函数指针，无法携带闭包环境，
+/// 因此把停止通道的发送端放进全局槽位。
+#[cfg(windows)]
+static STOP_TX: Mutex<Option<mpsc::Sender<Stop>>> = Mutex::new(None);
+
+/// 将控制台控制事件转换成对应的 CRT 信号编号后转发给主线程（Windows）。
+///
+/// Windows 没有 Unix 信号，控制台控制事件承担同样的角色：Ctrl+C/Ctrl+Break
+/// 对应 SIGINT，控制台关闭/注销/系统关机对应 SIGTERM。处理函数运行在系统创建
+/// 的独立线程上，直接把消息发给主线程即可。
+#[cfg(windows)]
+fn install_signal_handlers(stop_tx: mpsc::Sender<Stop>) {
+    *STOP_TX.lock().unwrap_or_else(|err| err.into_inner()) = Some(stop_tx);
+
+    if unsafe { SetConsoleCtrlHandler(Some(handle_console_event), 1) } == 0 {
+        let err = std::io::Error::last_os_error();
+        fatal!(error:display = err; "failed to install signal handlers");
+    }
+}
+
+/// 控制台控制事件的回调：转发事件后返回 1（已处理，不再传给后续处理函数）。
+#[cfg(windows)]
+unsafe extern "system" fn handle_console_event(event: u32) -> i32 {
+    // CRT 的信号编号与 Unix 保持一致（SIGINT = 2，SIGTERM = 15），
+    // 让日志里的 signal 字段在各平台上口径统一。
+    let (sig, grace) = match event {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT => (2, false),
+        _ => (15, true),
+    };
+
+    {
+        let stop_tx = STOP_TX.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some(stop_tx) = stop_tx.as_ref() {
+            let _ = stop_tx.send(Stop::Signal(sig));
+        }
+    }
+
+    if grace {
+        // 控制台关闭/注销/系统关机只给几秒钟收尾时间：稍作等待让主线程记录
+        // 日志并干净退出，处理函数返回后系统会直接结束进程。
+        thread::sleep(Duration::from_secs(2));
+    }
+
+    1
 }
 
 /// Block until shutdown is requested; never returns normally.
@@ -277,6 +332,6 @@ fn main() {
         move || reader_loop(listener, sender, networks, self_ips, stop_tx)
     });
 
-    spawn_signal_thread(stop_tx);
+    install_signal_handlers(stop_tx);
     wait_for_stop(stop_rx);
 }
