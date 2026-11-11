@@ -13,9 +13,15 @@ FROM ${BUILDER_IMAGE} AS chef
 
 # musl-dev: linker and headers for a static musl target
 # rust/cargo: plain alpine builders (x86) do not ship a Rust toolchain
+# file: asserts the built binary is static (scratch ships no dynamic loader)
 RUN if ! command -v cargo >/dev/null 2>&1; then apk add --no-cache rust cargo; fi \
-    && apk add --no-cache musl-dev \
+    && apk add --no-cache musl-dev file \
     && cargo install cargo-chef --locked
+
+# Alpine 发行版的 Rust（x86 构建）宿主三元组是 *-alpine-linux-musl，默认动态链接，
+# 放进 scratch 会因缺少 /lib/ld-musl-*.so.1 而无法启动；显式启用 crt-static 产出
+# 静态二进制。官方 rust:1-alpine 的 musl 目标本就默认静态，此设置是幂等的。
+ENV RUSTFLAGS="-C target-feature=+crt-static"
 
 WORKDIR /app
 
@@ -39,7 +45,13 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN cargo build --release
+# 断言二进制是静态链接：动态二进制在 scratch 运行时只会报
+# "exec /app/wol-relay: no such file or directory"，难以定位。
+RUN cargo build --release \
+    && if file target/release/wol-relay | grep -q interpreter; then \
+        echo "error: wol-relay is dynamically linked, but the runtime image has no loader" >&2; \
+        exit 1; \
+    fi
 
 # --------------------------------------------------------------------------------------
 # Run — minimal runtime image; the binary is fully static.

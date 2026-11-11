@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build the x86 container image from Alpine's Rust toolchain, since `rust:1-alpine`
   has no i386 variant
 
+### Fixed
+
+- Build a fully static binary for the x86 container image: Alpine's packaged Rust
+  links dynamically by default, which broke the `scratch` runtime with
+  `exec /app/wol-relay: no such file or directory`
+
 ## [0.2.0] - 2026-10-14
 
 > The service is now written in Rust. The Go implementation remains available on the
