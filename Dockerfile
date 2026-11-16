@@ -11,7 +11,7 @@ RUN --mount=type=bind,source=.,target=/code \
 
 # -------------------------------------------------
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 COPY --from=build /target/release/wol-relay /usr/local/bin/wol-relay
 
